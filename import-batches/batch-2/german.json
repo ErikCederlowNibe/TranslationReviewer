@@ -1,0 +1,17 @@
+[
+    {
+        "Panel-ID":  "P-2001",
+        "Original text":  "Set the daytime target temperature.",
+        "suggested translation":  "Stellen Sie die Tageszieltemperatur ein."
+    },
+    {
+        "Panel-ID":  "P-2002",
+        "Original text":  "Night mode lowers energy consumption automatically.",
+        "suggested translation":  "Der Nachtmodus senkt automatisch den Energieverbrauch."
+    },
+    {
+        "Panel-ID":  "P-2003",
+        "Original text":  "Temporary override expires after 2 hours.",
+        "suggested translation":  "Die temporare Ubersteuerung endet nach 2 Stunden."
+    }
+]

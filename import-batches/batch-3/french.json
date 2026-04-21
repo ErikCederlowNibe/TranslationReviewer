@@ -1,0 +1,17 @@
+[
+    {
+        "Panel-ID":  "P-3001",
+        "Original text":  "Water pressure is below recommended level.",
+        "suggested translation":  "La pression de l eau est inferieure au niveau recommande."
+    },
+    {
+        "Panel-ID":  "P-3002",
+        "Original text":  "Filter replacement is required soon.",
+        "suggested translation":  "Le remplacement du filtre sera bientot necessaire."
+    },
+    {
+        "Panel-ID":  "P-3003",
+        "Original text":  "System restart needed to apply safety changes.",
+        "suggested translation":  "Un redemarrage du systeme est necessaire pour appliquer les changements de securite."
+    }
+]

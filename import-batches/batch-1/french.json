@@ -1,0 +1,17 @@
+[
+    {
+        "Panel-ID":  "P-1001",
+        "Original text":  "Welcome to the heat pump setup wizard.",
+        "suggested translation":  "Bienvenue dans l assistant de configuration de la pompe a chaleur."
+    },
+    {
+        "Panel-ID":  "P-1002",
+        "Original text":  "Choose your preferred language to continue.",
+        "suggested translation":  "Choisissez votre langue preferee pour continuer."
+    },
+    {
+        "Panel-ID":  "P-1003",
+        "Original text":  "Connect the indoor unit to the home network.",
+        "suggested translation":  "Connectez l unite interieure au reseau domestique."
+    }
+]

@@ -1,0 +1,17 @@
+[
+    {
+        "Panel-ID":  "P-4001",
+        "Original text":  "Open the service valve before draining.",
+        "suggested translation":  "Abre la valvula de servicio antes de drenar."
+    },
+    {
+        "Panel-ID":  "P-4002",
+        "Original text":  "Capture a photo of the serial label.",
+        "suggested translation":  "Toma una foto de la etiqueta del numero de serie."
+    },
+    {
+        "Panel-ID":  "P-4003",
+        "Original text":  "Maintenance report submitted successfully.",
+        "suggested translation":  "Informe de mantenimiento enviado correctamente."
+    }
+]
