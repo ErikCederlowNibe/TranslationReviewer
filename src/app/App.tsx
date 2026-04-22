@@ -241,7 +241,7 @@ export default function App() {
   const [submittedSessions, setSubmittedSessions] = useState<SubmissionSessions>({});
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showDialog, setShowDialog] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(false);
   const [password, setPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [isAdminMode, setIsAdminMode] = useState(false);
