@@ -1566,26 +1566,16 @@ export default function App() {
         </div>
 
         {/* Completion Message */}
-        {hasTranslations && approved + disapproved === translations.length && !hasSubmittedCurrentBatch && (
+        {hasTranslations && approved + disapproved === translations.length && (
           <div className={`mt-6 rounded-lg p-6 text-center border ${
-            isDarkMode 
-                ? 'bg-[#1f2b25] border-[#6A9266]/55 text-[#b7c2bb]' 
+            isDarkMode
+              ? 'bg-[#1f2b25] border-[#6A9266]/55 text-[#b7c2bb]'
               : 'bg-[#C4D8B1]/35 border-[#8BA295] text-[#335033]'
           }`}>
             <p className="text-lg">
-              All translations reviewed! You can now submit your feedback.
-            </p>
-          </div>
-        )}
-
-        {hasTranslations && approved + disapproved === translations.length && hasSubmittedCurrentBatch && (
-          <div className={`mt-6 rounded-lg p-6 text-center border ${
-            isDarkMode
-                ? 'bg-[#1b2522] border-[#3f4e48] text-[#b7c2bb]'
-              : 'bg-[#f3f6ef] border-[#8BA295] text-[#335033]'
-          }`}>
-            <p className="text-lg">
-              This batch has been submitted. You can still make changes and resubmit until the admin locks it.
+              {hasSubmittedCurrentBatch
+                ? 'All translations reviewed. This batch has been submitted — you can still make changes and resubmit until the admin locks it.'
+                : 'All translations reviewed! You can now submit your feedback.'}
             </p>
           </div>
         )}
