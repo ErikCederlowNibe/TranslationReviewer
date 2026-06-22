@@ -32,6 +32,23 @@ interface BatchDataResponse {
   translationSeeds: TranslationSeed[];
   reviewSessions?: PersistedReviewSessions;
   submittedSessions?: SubmissionSessions;
+  lockedSessions?: SubmissionSessions;
+  archivedSessions?: SubmissionSessions;
+}
+
+interface ReviewedBatchEntry {
+  textId: string;
+  englishText: string;
+  originalTranslation: string;
+  finalTranslation: string;
+  approved: boolean | null;
+}
+
+interface ReviewedBatchSession {
+  batchId: string;
+  language: string;
+  archivedAt: string;
+  entries: ReviewedBatchEntry[];
 }
 
 interface PersistedReviewEntry {
@@ -231,6 +248,11 @@ export default function App() {
   const [translations, setTranslations] = useState<Translation[]>([]);
   const [reviewSessions, setReviewSessions] = useState<ReviewSessions>({});
   const [submittedSessions, setSubmittedSessions] = useState<SubmissionSessions>({});
+  const [lockedSessions, setLockedSessions] = useState<SubmissionSessions>({});
+  const [archivedSessions, setArchivedSessions] = useState<SubmissionSessions>({});
+  const [adminTab, setAdminTab] = useState<'batches' | 'download' | 'archived'>('batches');
+  const [reviewedBatchData, setReviewedBatchData] = useState<ReviewedBatchSession[]>([]);
+  const [isLoadingReviewedBatches, setIsLoadingReviewedBatches] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showDialog, setShowDialog] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -284,6 +306,8 @@ export default function App() {
         setTranslationSeeds(data.translationSeeds);
         setReviewSessions(hydrateReviewSessions(data.reviewSessions ?? {}, data.translationSeeds));
         setSubmittedSessions(data.submittedSessions ?? {});
+        setLockedSessions(data.lockedSessions ?? {});
+        setArchivedSessions(data.archivedSessions ?? {});
         if (data.batchDefinitions.length) {
           setSelectedBatchId(data.batchDefinitions[0].name);
         }
@@ -489,6 +513,8 @@ export default function App() {
       setTranslationSeeds(persistedData.translationSeeds);
       setReviewSessions(hydrateReviewSessions(persistedData.reviewSessions ?? {}, persistedData.translationSeeds));
       setSubmittedSessions(persistedData.submittedSessions ?? {});
+      setLockedSessions(persistedData.lockedSessions ?? {});
+      setArchivedSessions(persistedData.archivedSessions ?? {});
       setBatchZipFile(null);
       setBatchZipName('');
       if (batchZipInputRef.current) {
@@ -505,22 +531,130 @@ export default function App() {
     }
   };
 
-  const handleCopyCollectedBatches = async () => {
-    const reportPayload = reviewedBatchReports.map((report) => ({
-      language: report.language,
-      batchId: report.batchId,
-      batchName: report.batchName,
-      approved: report.approved,
-      disapproved: report.disapproved,
-      total: report.total,
-      submitted: true,
-    }));
+  const handleSwitchAdminTab = async (tab: 'batches' | 'download' | 'archived') => {
+    setAdminTab(tab);
+    if (tab === 'download' || tab === 'archived') {
+      setIsLoadingReviewedBatches(true);
+      try {
+        const response = await fetch(apiUrl('/api/reviewed-batches'));
+        if (!response.ok) throw new Error();
+        const data = await response.json() as { reviewedBatches: ReviewedBatchSession[] };
+        setReviewedBatchData(data.reviewedBatches ?? []);
+      } catch {
+        setAdminNotice('Failed to load reviewed batches.');
+      } finally {
+        setIsLoadingReviewedBatches(false);
+      }
+    }
+  };
 
+  const handleArchiveSessions = async (sessionKeys: string[]) => {
     try {
-      await navigator.clipboard.writeText(JSON.stringify(reportPayload, null, 2));
-      setAdminNotice('Collected reviewed batches copied to clipboard.');
+      const response = await fetch(apiUrl('/api/archive-sessions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKeys }),
+      });
+      if (!response.ok) throw new Error();
+      const nextArchived = { ...archivedSessions };
+      for (const key of sessionKeys) nextArchived[key] = true;
+      setArchivedSessions(nextArchived);
     } catch {
-      setAdminNotice('Could not copy automatically. Please use the list below.');
+      setAdminNotice('Download completed but failed to mark sessions as archived.');
+    }
+  };
+
+  const handleDownloadBatch = async (batchId: string, sessions: ReviewedBatchSession[]) => {
+    const zip = new JSZip();
+    for (const session of sessions) {
+      const rows = session.entries.map((entry) => ({
+        'Panel-ID': entry.textId,
+        'Original text': entry.englishText,
+        'suggested translation': entry.finalTranslation,
+      }));
+      zip.file(`${session.language.toLowerCase()}.json`, JSON.stringify(rows, null, 4));
+    }
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${batchId}-reviewed.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    await handleArchiveSessions(sessions.map((s) => `${s.language}:${s.batchId}`));
+  };
+
+  const handlePurgeOldArchives = async () => {
+    try {
+      const response = await fetch(apiUrl('/api/purge-old-archives'), { method: 'POST' });
+      if (!response.ok) throw new Error();
+      const { purged } = await response.json() as { purged: number };
+      if (purged === 0) {
+        setAdminNotice('No archives older than one month found.');
+        return;
+      }
+      const [batchRes, reviewedRes] = await Promise.all([
+        fetch(apiUrl('/api/batches')),
+        fetch(apiUrl('/api/reviewed-batches')),
+      ]);
+      if (batchRes.ok) {
+        const data = await batchRes.json() as BatchDataResponse;
+        setLockedSessions(data.lockedSessions ?? {});
+        setArchivedSessions(data.archivedSessions ?? {});
+      }
+      if (reviewedRes.ok) {
+        const data = await reviewedRes.json() as { reviewedBatches: ReviewedBatchSession[] };
+        setReviewedBatchData(data.reviewedBatches ?? []);
+      }
+      setAdminNotice(`Purged ${purged} session(s) archived more than one month ago.`);
+    } catch {
+      setAdminNotice('Failed to purge old archives.');
+    }
+  };
+
+  const handleUnlockSessions = async (sessionKeys: string[]) => {
+    try {
+      const response = await fetch(apiUrl('/api/unlock-sessions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKeys }),
+      });
+      if (!response.ok) throw new Error();
+      const nextLocked = { ...lockedSessions };
+      const nextArchived = { ...archivedSessions };
+      for (const key of sessionKeys) {
+        delete nextLocked[key];
+        delete nextArchived[key];
+      }
+      setLockedSessions(nextLocked);
+      setArchivedSessions(nextArchived);
+      setReviewedBatchData((prev) =>
+        prev.filter((s) => !sessionKeys.includes(`${s.language}:${s.batchId}`))
+      );
+      setAdminNotice(`Unlocked ${sessionKeys.length} session(s). Reviewers can now edit them again.`);
+    } catch {
+      setAdminNotice('Failed to unlock sessions. Please try again.');
+    }
+  };
+
+  const handleLockSessions = async (sessionKeys: string[]) => {
+    try {
+      const response = await fetch(apiUrl('/api/lock-sessions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKeys }),
+      });
+      if (!response.ok) throw new Error('Failed to lock sessions.');
+      const nextLocked = { ...lockedSessions };
+      for (const key of sessionKeys) {
+        nextLocked[key] = true;
+      }
+      setLockedSessions(nextLocked);
+      setAdminNotice(`Locked ${sessionKeys.length} session(s).`);
+    } catch {
+      setAdminNotice('Failed to lock sessions. Please try again.');
     }
   };
 
@@ -758,88 +892,235 @@ export default function App() {
                 </button>
               </form>
             ) : (
-              <div className="grid gap-6 lg:grid-cols-2">
-                <form
-                  onSubmit={handleAddBatch}
-                  className={`rounded-2xl border p-6 space-y-4 ${
-                    isDarkMode ? 'bg-[#141b19] border-[#2f3a35]' : 'bg-[#f7f8f3] border-[#C4D8B1]'
-                  }`}
-                >
-                  <h2 className={`text-2xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Add Batch</h2>
-                  <p className={`text-sm ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
-                    Batch name is taken from the zip filename. Include one JSON file per language named
-                    <code className="mx-1 font-mono">{'{language}.json'}</code>
-                    (e.g. <code className="font-mono">french.json</code>).
-                    Each row must contain Panel-ID, Original text, and suggested translation.
-                  </p>
-                  <input
-                    ref={batchZipInputRef}
-                    type="file"
-                    accept=".zip,application/zip"
-                    onChange={handleBatchZipSelect}
-                    className="hidden"
-                  />
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleOpenBatchZipPicker}
-                      className="px-4 py-2 bg-[#4e5a55] text-white rounded-lg hover:bg-[#5f6d67] transition-colors"
-                    >
-                      Select Batch Zip
-                    </button>
-                    <span className={`text-sm ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
-                      {batchZipName || 'No zip file selected'}
-                    </span>
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-6 py-3 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors"
-                  >
-                    Add Batch
-                  </button>
-                </form>
+              <>
+                {/* Tab bar */}
+                <div className="flex gap-2 mb-6 border-b pb-0" style={{ borderColor: isDarkMode ? '#2f3a35' : '#C4D8B1' }}>
+                  {(['batches', 'download', 'archived'] as const).map((tab) => {
+                    const labels = { batches: 'Batch Management', download: 'Locked Batches', archived: 'Archived' };
+                    const isActive = adminTab === tab;
+                    return (
+                      <button
+                        key={tab}
+                        type="button"
+                        onClick={() => handleSwitchAdminTab(tab)}
+                        className={`px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors -mb-px ${
+                          isActive
+                            ? isDarkMode
+                              ? 'border-[#6A9266] text-[#6A9266]'
+                              : 'border-[#6A9266] text-[#6A9266]'
+                            : isDarkMode
+                            ? 'border-transparent text-[#93a19a] hover:text-[#b7c2bb]'
+                            : 'border-transparent text-[#808080] hover:text-[#556052]'
+                        }`}
+                      >
+                        {labels[tab]}
+                      </button>
+                    );
+                  })}
+                </div>
 
-                <div
-                  className={`rounded-2xl border p-6 ${
-                    isDarkMode ? 'bg-[#141b19] border-[#2f3a35]' : 'bg-[#f7f8f3] border-[#C4D8B1]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-4 gap-3">
-                    <h2 className={`text-2xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Collected Reviewed Batches</h2>
-                    <button
-                      onClick={handleCopyCollectedBatches}
-                      className="px-4 py-2 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors text-sm"
-                      type="button"
+                {/* Batch Management tab */}
+                {adminTab === 'batches' && (
+                  <div className="grid gap-6 lg:grid-cols-2">
+                    <form
+                      onSubmit={handleAddBatch}
+                      className={`rounded-2xl border p-6 space-y-4 ${
+                        isDarkMode ? 'bg-[#141b19] border-[#2f3a35]' : 'bg-[#f7f8f3] border-[#C4D8B1]'
+                      }`}
                     >
-                      Copy Report
-                    </button>
-                  </div>
+                      <h2 className={`text-2xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Add Batch</h2>
+                      <p className={`text-sm ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
+                        Batch name is taken from the zip filename. Include one JSON file per language named
+                        <code className="mx-1 font-mono">{'{language}.json'}</code>
+                        (e.g. <code className="font-mono">french.json</code>).
+                        Each row must contain Panel-ID, Original text, and suggested translation.
+                      </p>
+                      <input
+                        ref={batchZipInputRef}
+                        type="file"
+                        accept=".zip,application/zip"
+                        onChange={handleBatchZipSelect}
+                        className="hidden"
+                      />
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={handleOpenBatchZipPicker}
+                          className="px-4 py-2 bg-[#4e5a55] text-white rounded-lg hover:bg-[#5f6d67] transition-colors"
+                        >
+                          Select Batch Zip
+                        </button>
+                        <span className={`text-sm ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
+                          {batchZipName || 'No zip file selected'}
+                        </span>
+                      </div>
+                      <button
+                        type="submit"
+                        className="px-6 py-3 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors"
+                      >
+                        Add Batch
+                      </button>
+                    </form>
 
-                  {reviewedBatchReports.length === 0 ? (
-                    <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>
-                      No submitted batches yet.
-                    </p>
-                  ) : (
-                    <div className="space-y-3 max-h-[320px] overflow-auto pr-1">
-                      {reviewedBatchReports.map((report) => (
-                        <div
-                          key={report.sessionKey}
-                          className={`rounded-xl border px-4 py-3 ${
-                            isDarkMode ? 'bg-[#1f2b25] border-[#2f3a35]' : 'bg-white border-[#C4D8B1]'
+                    <div className={`rounded-2xl border p-6 ${isDarkMode ? 'bg-[#141b19] border-[#2f3a35]' : 'bg-[#f7f8f3] border-[#C4D8B1]'}`}>
+                      <div className="flex items-center justify-between mb-4 gap-3">
+                        <h2 className={`text-2xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Submitted Reviews</h2>
+                        {reviewedBatchReports.some((r) => !lockedSessions[r.sessionKey]) && (
+                          <button
+                            type="button"
+                            onClick={() => handleLockSessions(reviewedBatchReports.filter((r) => !lockedSessions[r.sessionKey]).map((r) => r.sessionKey))}
+                            className="px-4 py-2 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors text-sm"
+                          >
+                            Lock All Pending
+                          </button>
+                        )}
+                      </div>
+                      {reviewedBatchReports.length === 0 ? (
+                        <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>No submitted batches yet.</p>
+                      ) : (
+                        <div className="space-y-3 max-h-[320px] overflow-auto pr-1">
+                          {reviewedBatchReports.map((report) => {
+                            const isLocked = !!lockedSessions[report.sessionKey];
+                            return (
+                              <div key={report.sessionKey} className={`rounded-xl border px-4 py-3 ${isDarkMode ? 'bg-[#1f2b25] border-[#2f3a35]' : 'bg-white border-[#C4D8B1]'}`}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className={`font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{report.batchName} ({report.language})</p>
+                                    <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>Approved {report.approved} • Disapproved {report.disapproved} • Total {report.total}</p>
+                                  </div>
+                                  {isLocked ? (
+                                    <span className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold bg-[#6A9266] text-white">Locked</span>
+                                  ) : (
+                                    <button type="button" onClick={() => handleLockSessions([report.sessionKey])} className="shrink-0 px-3 py-1 text-xs font-semibold rounded-full border border-[#6A9266] text-[#6A9266] hover:bg-[#6A9266] hover:text-white transition-colors">
+                                      Lock
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Download Locked Batches tab */}
+                {adminTab === 'download' && (() => {
+                  const pendingBatches = Object.values(
+                    reviewedBatchData
+                      .filter((s) => lockedSessions[`${s.language}:${s.batchId}`] && !archivedSessions[`${s.language}:${s.batchId}`])
+                      .reduce<Record<string, { batchId: string; sessions: ReviewedBatchSession[] }>>((acc, s) => {
+                        if (!acc[s.batchId]) acc[s.batchId] = { batchId: s.batchId, sessions: [] };
+                        acc[s.batchId].sessions.push(s);
+                        return acc;
+                      }, {})
+                  );
+                  return (
+                    <div>
+                      {isLoadingReviewedBatches ? (
+                        <div className="flex items-center gap-3 py-6">
+                          <div className="w-5 h-5 rounded-full border-2 border-[#6A9266] border-t-transparent animate-spin" />
+                          <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>Loading locked batches…</p>
+                        </div>
+                      ) : pendingBatches.length === 0 ? (
+                        <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>No locked batches ready for download.</p>
+                      ) : (
+                        <div className="space-y-4">
+                          {pendingBatches.map(({ batchId, sessions }) => (
+                            <div key={batchId} className={`rounded-2xl border p-5 ${isDarkMode ? 'bg-[#141b19] border-[#2f3a35]' : 'bg-[#f7f8f3] border-[#C4D8B1]'}`}>
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <p className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{batchId}</p>
+                                  <p className={`text-sm mt-1 ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
+                                    {sessions.map((s) => s.language).join(', ')} · {sessions[0]?.entries.length ?? 0} rows each
+                                  </p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadBatch(batchId, sessions)}
+                                  className="shrink-0 px-4 py-2 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors text-sm"
+                                >
+                                  Download zip
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Archived tab */}
+                {adminTab === 'archived' && (() => {
+                  const archivedBatches = Object.values(
+                    reviewedBatchData
+                      .filter((s) => archivedSessions[`${s.language}:${s.batchId}`])
+                      .reduce<Record<string, { batchId: string; sessions: ReviewedBatchSession[] }>>((acc, s) => {
+                        if (!acc[s.batchId]) acc[s.batchId] = { batchId: s.batchId, sessions: [] };
+                        acc[s.batchId].sessions.push(s);
+                        return acc;
+                      }, {})
+                  );
+                  return (
+                    <div>
+                      <div className="flex justify-end mb-4">
+                        <button
+                          type="button"
+                          onClick={handlePurgeOldArchives}
+                          className={`px-4 py-2 text-sm rounded-lg border transition-colors ${
+                            isDarkMode
+                              ? 'border-[#3a4742] text-[#93a19a] hover:border-[#A81524] hover:text-[#A81524]'
+                              : 'border-[#C4D8B1] text-[#808080] hover:border-[#A81524] hover:text-[#A81524]'
                           }`}
                         >
-                          <p className={`font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                            {report.batchName} ({report.language})
-                          </p>
-                          <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>
-                            Approved {report.approved} • Disapproved {report.disapproved} • Total {report.total}
-                          </p>
+                          Purge archives older than one month
+                        </button>
+                      </div>
+                      {isLoadingReviewedBatches ? (
+                        <div className="flex items-center gap-3 py-6">
+                          <div className="w-5 h-5 rounded-full border-2 border-[#6A9266] border-t-transparent animate-spin" />
+                          <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>Loading archived batches…</p>
                         </div>
-                      ))}
+                      ) : archivedBatches.length === 0 ? (
+                        <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>No archived batches yet.</p>
+                      ) : (
+                        <div className="space-y-4">
+                          {archivedBatches.map(({ batchId, sessions }) => (
+                            <div key={batchId} className={`rounded-2xl border p-5 ${isDarkMode ? 'bg-[#141b19] border-[#2f3a35]' : 'bg-[#f7f8f3] border-[#C4D8B1]'}`}>
+                              <div className="flex items-start justify-between gap-4">
+                                <div>
+                                  <p className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{batchId}</p>
+                                  <p className={`text-sm mt-1 ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
+                                    {sessions.map((s) => s.language).join(', ')} · {sessions[0]?.entries.length ?? 0} rows each
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadBatch(batchId, sessions)}
+                                    className="px-4 py-2 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors text-sm"
+                                  >
+                                    Download again
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUnlockSessions(sessions.map((s) => `${s.language}:${s.batchId}`))}
+                                    className="px-4 py-2 rounded-lg border text-sm transition-colors border-[#6A9266] text-[#6A9266] hover:bg-[#6A9266] hover:text-white"
+                                  >
+                                    Unlock
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              </div>
+                  );
+                })()}
+              </>
             )}
 
             {adminNotice && (
@@ -1057,7 +1338,7 @@ export default function App() {
               </p>
               <h1 className={`text-4xl mb-3 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Choose a Batch</h1>
               <p className={`text-lg ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#808080]'}`}>
-                Open the next translation batch. Completed batches are marked so reviewers can avoid repeating work.
+                Open the next translation batch. Submitted batches are no longer shown.
               </p>
             </div>
 
@@ -1068,16 +1349,13 @@ export default function App() {
                   : 'bg-[#C4D8B1]/35 border-[#8BA295] text-[#335033]'
               }`}>
                 <p className="text-base font-medium">
-                  All batches for {activeLanguage} are done. Every batch has been submitted.
-                </p>
-                <p className="text-sm mt-2">
-                  You can still open any batch and update its submission if needed.
+                  All batches for {activeLanguage} have been submitted. Waiting for admin to lock them.
                 </p>
               </div>
             )}
 
             <div className="grid gap-4 md:grid-cols-3">
-              {batchDefinitions.map((batch) => {
+              {batchDefinitions.filter((batch) => !lockedSessions[getSessionKey(activeLanguage, batch.name)]).map((batch) => {
                 const sessionKey = getSessionKey(activeLanguage, batch.name);
                 const sessionTranslations = reviewSessions[sessionKey];
                 const reviewed = isBatchReviewed(sessionTranslations);
@@ -1303,7 +1581,7 @@ export default function App() {
               : 'bg-[#f3f6ef] border-[#8BA295] text-[#335033]'
           }`}>
             <p className="text-lg">
-              This batch was already submitted. You can update the submission if you make changes.
+              This batch has been submitted. You can still make changes and resubmit until the admin locks it.
             </p>
           </div>
         )}

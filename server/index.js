@@ -2,9 +2,14 @@ import cors from 'cors';
 import express from 'express';
 import {
   addBatchWithSeeds,
+  archiveSessions,
   getBatchData,
+  getReviewedBatches,
   initDatabase,
+  lockSessions,
+  purgeOldArchives,
   saveReviewState,
+  unlockSessions,
 } from './db.js';
 import { SUPPORTED_LANGUAGES } from './languages.js';
 
@@ -157,6 +162,75 @@ app.post('/api/batches', async (req, res) => {
     return res.status(201).json(data);
   } catch {
     return res.status(500).json({ error: 'Failed to save batch data.' });
+  }
+});
+
+app.post('/api/lock-sessions', async (req, res) => {
+  const { sessionKeys } = req.body ?? {};
+
+  if (!Array.isArray(sessionKeys) || !sessionKeys.length) {
+    return res.status(400).json({ error: 'sessionKeys must be a non-empty array.' });
+  }
+
+  if (!sessionKeys.every((k) => typeof k === 'string')) {
+    return res.status(400).json({ error: 'All sessionKeys must be strings.' });
+  }
+
+  try {
+    await lockSessions(sessionKeys);
+    return res.status(200).json({ ok: true });
+  } catch {
+    return res.status(500).json({ error: 'Failed to lock sessions.' });
+  }
+});
+
+app.post('/api/archive-sessions', async (req, res) => {
+  const { sessionKeys } = req.body ?? {};
+  if (!Array.isArray(sessionKeys) || !sessionKeys.length) {
+    return res.status(400).json({ error: 'sessionKeys must be a non-empty array.' });
+  }
+  if (!sessionKeys.every((k) => typeof k === 'string')) {
+    return res.status(400).json({ error: 'All sessionKeys must be strings.' });
+  }
+  try {
+    await archiveSessions(sessionKeys);
+    return res.status(200).json({ ok: true });
+  } catch {
+    return res.status(500).json({ error: 'Failed to archive sessions.' });
+  }
+});
+
+app.post('/api/unlock-sessions', async (req, res) => {
+  const { sessionKeys } = req.body ?? {};
+  if (!Array.isArray(sessionKeys) || !sessionKeys.length) {
+    return res.status(400).json({ error: 'sessionKeys must be a non-empty array.' });
+  }
+  if (!sessionKeys.every((k) => typeof k === 'string')) {
+    return res.status(400).json({ error: 'All sessionKeys must be strings.' });
+  }
+  try {
+    await unlockSessions(sessionKeys);
+    return res.status(200).json({ ok: true });
+  } catch {
+    return res.status(500).json({ error: 'Failed to unlock sessions.' });
+  }
+});
+
+app.post('/api/purge-old-archives', async (_req, res) => {
+  try {
+    const { purged } = await purgeOldArchives();
+    return res.status(200).json({ ok: true, purged });
+  } catch {
+    return res.status(500).json({ error: 'Failed to purge old archives.' });
+  }
+});
+
+app.get('/api/reviewed-batches', async (_req, res) => {
+  try {
+    const reviewedBatches = await getReviewedBatches();
+    res.json({ reviewedBatches });
+  } catch {
+    res.status(500).json({ error: 'Failed to read reviewed batches.' });
   }
 });
 

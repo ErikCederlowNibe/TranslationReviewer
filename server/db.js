@@ -233,12 +233,18 @@ async function readAllBatches(db) {
 }
 
 async function readAllSeeds(db, batchDefinitions) {
+  const snapshots = await Promise.all(
+    batchDefinitions.map((batch) =>
+      batchRef(db, batch.name).collection('translation_seeds').get()
+        .then((snap) => ({ batch, snap }))
+    )
+  );
+
   const translationSeeds = [];
   const seedsByBatch = new Map();
 
-  for (const batch of batchDefinitions) {
-    const seedSnapshot = await batchRef(db, batch.name).collection('translation_seeds').get();
-    const seeds = seedSnapshot.docs
+  for (const { batch, snap } of snapshots) {
+    const seeds = snap.docs
       .map((doc) => {
         const data = doc.data();
         return {
@@ -270,21 +276,39 @@ export async function getBatchData() {
   const batchDefinitions = await readAllBatches(db);
   const { translationSeeds, seedsByBatch } = await readAllSeeds(db, batchDefinitions);
 
-  const reviewSessions = {};
-  for (const batch of batchDefinitions) {
+  const reviewEntryPromises = batchDefinitions.flatMap((batch) => {
     const seedsForBatch = seedsByBatch.get(batch.name) ?? [];
+    return SUPPORTED_LANGUAGES.map((language) =>
+      readReviewEntries(db, batch.name, language, seedsForBatch)
+        .then((entries) => ({ sessionKey: `${language}:${batch.name}`, entries }))
+    );
+  });
 
-      for (const language of SUPPORTED_LANGUAGES) {
-        const sessionKey = `${language}:${batch.name}`;
-      reviewSessions[sessionKey] = await readReviewEntries(db, batch.name, language, seedsForBatch);
-    }
+  const [reviewResults, submittedSnap, lockedSnap, archivedSnap] = await Promise.all([
+    Promise.all(reviewEntryPromises),
+    db.collection('submitted_sessions').get(),
+    db.collection('locked_sessions').get(),
+    db.collection('archived_sessions').get(),
+  ]);
+
+  const reviewSessions = {};
+  for (const { sessionKey, entries } of reviewResults) {
+    reviewSessions[sessionKey] = entries;
   }
 
-  const submittedSnapshots = await db.collection('submitted_sessions').get();
   const submittedSessions = {};
-  for (const doc of submittedSnapshots.docs) {
-    const data = doc.data();
-    submittedSessions[doc.id] = !!data.submitted;
+  for (const doc of submittedSnap.docs) {
+    submittedSessions[doc.id] = !!doc.data().submitted;
+  }
+
+  const lockedSessions = {};
+  for (const doc of lockedSnap.docs) {
+    lockedSessions[doc.id] = !!doc.data().locked;
+  }
+
+  const archivedSessions = {};
+  for (const doc of archivedSnap.docs) {
+    archivedSessions[doc.id] = !!doc.data().archived;
   }
 
   return {
@@ -292,6 +316,8 @@ export async function getBatchData() {
     translationSeeds,
     reviewSessions,
     submittedSessions,
+    lockedSessions,
+    archivedSessions,
   };
 }
 
@@ -332,6 +358,165 @@ export async function addBatchWithSeeds(batch, translationSeeds) {
   await writer.close();
 
   return getBatchData();
+}
+
+export async function archiveSessions(sessionKeys) {
+  const db = ensureFirestore();
+  const writer = db.bulkWriter();
+  const archivedAt = new Date().toISOString();
+  for (const sessionKey of sessionKeys) {
+    writer.set(db.collection('archived_sessions').doc(sessionKey), { archived: true, archivedAt });
+  }
+  await writer.close();
+}
+
+export async function purgeOldArchives() {
+  const db = ensureFirestore();
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 1);
+
+  const archivedSnap = await db.collection('archived_sessions').get();
+  const oldKeys = archivedSnap.docs
+    .filter((doc) => {
+      const { archivedAt } = doc.data();
+      return typeof archivedAt === 'string' && new Date(archivedAt) <= cutoff;
+    })
+    .map((doc) => doc.id);
+
+  if (!oldKeys.length) return { purged: 0 };
+
+  const writer = db.bulkWriter();
+  for (const sessionKey of oldKeys) {
+    const session = splitSessionKey(sessionKey);
+    if (!session) continue;
+    writer.delete(db.collection('archived_sessions').doc(sessionKey));
+    writer.delete(db.collection('locked_sessions').doc(sessionKey));
+    writer.delete(db.collection('submitted_sessions').doc(sessionKey));
+    writer.delete(reviewRef(db, session.batchId, session.language));
+    writer.delete(
+      db.collection('reviewed_batches').doc(session.batchId)
+        .collection('languages').doc(session.language)
+    );
+  }
+  await writer.close();
+
+  return { purged: oldKeys.length };
+}
+
+export async function unlockSessions(sessionKeys) {
+  const db = ensureFirestore();
+  const writer = db.bulkWriter();
+  for (const sessionKey of sessionKeys) {
+    const session = splitSessionKey(sessionKey);
+    if (!session) continue;
+    writer.delete(db.collection('locked_sessions').doc(sessionKey));
+    writer.delete(db.collection('archived_sessions').doc(sessionKey));
+    writer.delete(
+      db.collection('reviewed_batches').doc(session.batchId)
+        .collection('languages').doc(session.language)
+    );
+  }
+  await writer.close();
+}
+
+export async function lockSessions(sessionKeys) {
+  const db = ensureFirestore();
+
+  // Group by batchId so we only read seeds once per batch.
+  const sessionsByBatch = new Map();
+  for (const sessionKey of sessionKeys) {
+    const session = splitSessionKey(sessionKey);
+    if (!session) continue;
+    if (!sessionsByBatch.has(session.batchId)) {
+      sessionsByBatch.set(session.batchId, []);
+    }
+    sessionsByBatch.get(session.batchId).push(session);
+  }
+
+  const writer = db.bulkWriter();
+
+  for (const [batchId, sessions] of sessionsByBatch) {
+    const seedSnapshot = await batchRef(db, batchId).collection('translation_seeds').get();
+    const seedsForBatch = seedSnapshot.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: typeof data.id === 'string' ? data.id : doc.id,
+        englishText: typeof data.englishText === 'string' ? data.englishText : '',
+        translations: data.translations && typeof data.translations === 'object' ? data.translations : {},
+      };
+    });
+    const seedMap = new Map(seedsForBatch.map((s) => [s.id, s]));
+
+    for (const session of sessions) {
+      const reviewEntries = await readReviewEntries(db, batchId, session.language, seedsForBatch);
+
+      const archivedEntries = reviewEntries.map((entry) => {
+        const seed = seedMap.get(entry.textId);
+        const originalTranslation =
+          typeof seed?.translations?.[session.language] === 'string'
+            ? seed.translations[session.language]
+            : '';
+        const isDisapproved = entry.reviewed && entry.approved === false;
+        const finalTranslation = isDisapproved
+          ? (typeof entry.suggestedTranslation === 'string' ? entry.suggestedTranslation : originalTranslation)
+          : originalTranslation;
+
+        return {
+          textId: entry.textId,
+          englishText: seed?.englishText ?? '',
+          originalTranslation,
+          finalTranslation,
+          approved: entry.reviewed ? (entry.approved === true ? true : false) : null,
+        };
+      });
+
+      writer.set(
+        db.collection('reviewed_batches').doc(batchId).collection('languages').doc(session.language),
+        {
+          batchId,
+          language: session.language,
+          archivedAt: new Date().toISOString(),
+          entries: archivedEntries,
+        }
+      );
+
+      writer.set(
+        db.collection('locked_sessions').doc(`${session.language}:${batchId}`),
+        { locked: true }
+      );
+    }
+  }
+
+  await writer.close();
+}
+
+export async function getReviewedBatches() {
+  const db = ensureFirestore();
+  const batchesSnap = await db.collection('reviewed_batches').get();
+
+  const result = [];
+  for (const batchDoc of batchesSnap.docs) {
+    const languagesSnap = await batchDoc.ref.collection('languages').get();
+    for (const langDoc of languagesSnap.docs) {
+      const data = langDoc.data();
+      result.push({
+        batchId: typeof data.batchId === 'string' ? data.batchId : batchDoc.id,
+        language: typeof data.language === 'string' ? data.language : langDoc.id,
+        archivedAt: typeof data.archivedAt === 'string' ? data.archivedAt : '',
+        entries: Array.isArray(data.entries)
+          ? data.entries.map((entry) => ({
+              textId: typeof entry.textId === 'string' ? entry.textId : '',
+              englishText: typeof entry.englishText === 'string' ? entry.englishText : '',
+              originalTranslation: typeof entry.originalTranslation === 'string' ? entry.originalTranslation : '',
+              finalTranslation: typeof entry.finalTranslation === 'string' ? entry.finalTranslation : '',
+              approved: entry.approved === true ? true : entry.approved === false ? false : null,
+            }))
+          : [],
+      });
+    }
+  }
+
+  return result;
 }
 
 export async function saveReviewState(reviewSessions, submittedSessions) {
