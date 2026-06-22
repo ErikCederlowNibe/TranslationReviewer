@@ -65,9 +65,6 @@ function apiUrl(path: string) {
   return apiBaseUrl ? `${apiBaseUrl}${path}` : path;
 }
 
-const initialBatchDefinitions: BatchDefinition[] = [];
-const initialTranslationSeeds: TranslationSeed[] = [];
-
 interface ImportTranslationRow {
   panelId: string;
   originalText: string;
@@ -225,8 +222,8 @@ function toPersistedReviewSessions(reviewSessions: ReviewSessions): PersistedRev
 }
 
 export default function App() {
-  const [batchDefinitions, setBatchDefinitions] = useState<BatchDefinition[]>(initialBatchDefinitions);
-  const [translationSeeds, setTranslationSeeds] = useState<TranslationSeed[]>(initialTranslationSeeds);
+  const [batchDefinitions, setBatchDefinitions] = useState<BatchDefinition[]>([]);
+  const [translationSeeds, setTranslationSeeds] = useState<TranslationSeed[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('Spanish');
   const [activeLanguage, setActiveLanguage] = useState<string | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState('');
@@ -897,34 +894,52 @@ export default function App() {
                 <p className={`text-sm uppercase tracking-[0.2em] mb-4 ${isDarkMode ? 'text-[#93a19a]' : 'text-[#808080]'}`}>
                   Choose language
                 </p>
-                <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-4">
                   {SUPPORTED_LANGUAGES.map((language) => {
                     const isActive = selectedLanguage === language;
+                    const isComplete = batchDefinitions.every((batch) => {
+                      const sessionKey = getSessionKey(language, batch.name);
+                      return submittedSessions[sessionKey];
+                    });
 
                     return (
                       <button
                         key={language}
                         type="button"
                         onClick={() => handleLanguageSelection(language)}
-                        className={`rounded-2xl border p-5 text-left transition-all ${
+                        className={`rounded-lg border p-4 text-center transition-all relative ${
                           isActive
                             ? isDarkMode
-                              ? 'bg-[#22302a] border-[#6A9266]/70 shadow-lg shadow-black/20'
-                              : 'bg-[#C4D8B1]/45 border-[#6A9266] shadow-lg shadow-[#C4D8B1]/40'
+                              ? 'bg-[#22302a] border-[#6A9266] shadow-md'
+                              : 'bg-[#C4D8B1]/50 border-[#6A9266] shadow-md'
                             : isDarkMode
                             ? 'bg-[#141b19] border-[#2f3a35] hover:border-[#6A9266]/60'
                             : 'bg-[#f7f8f3] border-[#C4D8B1] hover:border-[#8BA295]'
                         }`}
                       >
-                        <p className={`text-xl mb-1 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{language}</p>
-                        <p className={`text-sm ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#808080]'}`}>
-                          Review the {language.toLowerCase()} translation batch.
+                        <p className={`text-sm font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                          {language}
                         </p>
+                        {isComplete && (
+                          <span className="absolute top-2 right-2 bg-[#6A9266] text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                            ✓
+                          </span>
+                        )}
                       </button>
                     );
                   })}
                 </div>
               </div>
+
+              {batchDefinitions.length > 0 && batchDefinitions.every((batch) => submittedSessions[getSessionKey(selectedLanguage, batch.name)]) && (
+                <div className={`rounded-2xl border px-5 py-4 ${
+                  isDarkMode ? 'bg-[#1a3d2e] border-[#6A9266]' : 'bg-[#e8f1e0] border-[#6A9266]'
+                }`}>
+                  <p className={`text-sm font-medium ${isDarkMode ? 'text-[#8FD99E]' : 'text-[#4a7c4e]'}`}>
+                    ✓ All batches completed for {selectedLanguage}
+                  </p>
+                </div>
+              )}
 
               <div className="max-w-xl">
                 <label
