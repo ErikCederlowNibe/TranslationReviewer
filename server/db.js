@@ -3,13 +3,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applicationDefault, cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { SUPPORTED_LANGUAGES } from './languages.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const dataDir = path.join(__dirname, 'data');
 const legacyJsonPath = path.join(dataDir, 'batches.json');
-
-const supportedLanguages = ['Spanish', 'French', 'German'];
 
 let firestore;
 
@@ -32,7 +31,7 @@ function splitSessionKey(sessionKey) {
   const [language, ...batchParts] = sessionKey.split(':');
   const batchId = batchParts.join(':');
 
-  if (!supportedLanguages.includes(language) || !batchId) {
+  if (!SUPPORTED_LANGUAGES.includes(language) || !batchId) {
     return null;
   }
 
@@ -169,11 +168,7 @@ async function importLegacyJsonIfNeeded(db) {
         id: seed.id,
         englishText: seed.englishText,
         batchId: seed.batchId,
-        translations: {
-          Spanish: seed.translations.Spanish,
-          French: seed.translations.French,
-          German: seed.translations.German,
-        },
+        translations: typeof seed.translations === 'object' && seed.translations ? seed.translations : {},
       });
     }
 
@@ -250,11 +245,12 @@ async function readAllSeeds(db, batchDefinitions) {
           id: typeof data.id === 'string' ? data.id : doc.id,
           englishText: typeof data.englishText === 'string' ? data.englishText : '',
           batchId: batch.name,
-          translations: {
-            Spanish: typeof data?.translations?.Spanish === 'string' ? data.translations.Spanish : '',
-            French: typeof data?.translations?.French === 'string' ? data.translations.French : '',
-            German: typeof data?.translations?.German === 'string' ? data.translations.German : '',
-          },
+          translations: Object.fromEntries(
+            SUPPORTED_LANGUAGES.map((lang) => [
+              lang,
+              typeof data?.translations?.[lang] === 'string' ? data.translations[lang] : '',
+            ])
+          ),
         };
       })
       .sort((a, b) => a.id.localeCompare(b.id));
@@ -278,8 +274,8 @@ export async function getBatchData() {
   for (const batch of batchDefinitions) {
     const seedsForBatch = seedsByBatch.get(batch.name) ?? [];
 
-    for (const language of supportedLanguages) {
-      const sessionKey = `${language}:${batch.name}`;
+      for (const language of SUPPORTED_LANGUAGES) {
+        const sessionKey = `${language}:${batch.name}`;
       reviewSessions[sessionKey] = await readReviewEntries(db, batch.name, language, seedsForBatch);
     }
   }
@@ -319,15 +315,11 @@ export async function addBatchWithSeeds(batch, translationSeeds) {
       id: seed.id,
       englishText: seed.englishText,
       batchId: batch.name,
-      translations: {
-        Spanish: seed.translations.Spanish,
-        French: seed.translations.French,
-        German: seed.translations.German,
-      },
+      translations: seed.translations,
     });
   }
 
-  for (const language of supportedLanguages) {
+  for (const language of SUPPORTED_LANGUAGES) {
     writer.set(reviewRef(db, batch.name, language), {
       entries: translationSeeds.map((seed) => ({
         textId: seed.id,

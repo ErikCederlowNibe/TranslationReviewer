@@ -4,6 +4,7 @@ import { TranslationCard } from './components/TranslationCard';
 import { ProgressBar } from './components/ProgressBar';
 import { SubmitDialog } from './components/SubmitDialog';
 import { ArrowLeft, Languages, LockKeyhole, Moon, Sun } from 'lucide-react';
+import { SUPPORTED_LANGUAGES, LANGUAGE_PASSWORDS } from './languages';
 
 interface Translation {
   id: string;
@@ -14,13 +15,11 @@ interface Translation {
   correction?: string;
 }
 
-type SupportedLanguage = 'Spanish' | 'French' | 'German';
-
 interface TranslationSeed {
   id: string;
   englishText: string;
   batchId: string;
-  translations: Record<SupportedLanguage, string>;
+  translations: Record<string, string>;
 }
 
 interface BatchDefinition {
@@ -48,7 +47,7 @@ type ReviewSessions = Record<string, Translation[]>;
 type SubmissionSessions = Record<string, boolean>;
 interface ReviewedBatchReport {
   sessionKey: string;
-  language: SupportedLanguage;
+  language: string;
   batchId: string;
   batchName: string;
   approved: number;
@@ -56,11 +55,7 @@ interface ReviewedBatchReport {
   total: number;
 }
 
-const languagePasswords: Record<SupportedLanguage, string> = {
-  Spanish: 'hola-review',
-  French: 'bonjour-review',
-  German: 'hallo-review',
-};
+const languagePasswords = LANGUAGE_PASSWORDS;
 
 const adminPassword = 'nibe-admin';
 
@@ -152,7 +147,7 @@ function formatImportedAt(value: string) {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }
 
-function getSessionKey(language: SupportedLanguage, batchId: string) {
+function getSessionKey(language: string, batchId: string) {
   return `${language}:${batchId}`;
 }
 
@@ -160,7 +155,7 @@ function isBatchReviewed(translations: Translation[] | undefined) {
   return !!translations?.length && translations.every((translation) => translation.status !== null);
 }
 
-function createTranslationsFromSeeds(seeds: TranslationSeed[], language: SupportedLanguage, batchId: string): Translation[] {
+function createTranslationsFromSeeds(seeds: TranslationSeed[], language: string, batchId: string): Translation[] {
   return seeds
     .filter((translation) => translation.batchId === batchId)
     .map((translation) => ({
@@ -179,7 +174,7 @@ function hydrateReviewSessions(
   const hydrated: ReviewSessions = {};
 
   for (const [sessionKey, entries] of Object.entries(persistedReviewSessions)) {
-    const [language, batchId] = sessionKey.split(':') as [SupportedLanguage, string];
+    const [language, batchId] = sessionKey.split(':') as [string, string];
     const baseRows = createTranslationsFromSeeds(seeds, language, batchId);
     const entryMap = new Map(entries.map((entry) => [entry.textId, entry]));
 
@@ -232,8 +227,8 @@ function toPersistedReviewSessions(reviewSessions: ReviewSessions): PersistedRev
 export default function App() {
   const [batchDefinitions, setBatchDefinitions] = useState<BatchDefinition[]>(initialBatchDefinitions);
   const [translationSeeds, setTranslationSeeds] = useState<TranslationSeed[]>(initialTranslationSeeds);
-  const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>('Spanish');
-  const [activeLanguage, setActiveLanguage] = useState<SupportedLanguage | null>(null);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('Spanish');
+  const [activeLanguage, setActiveLanguage] = useState<string | null>(null);
   const [selectedBatchId, setSelectedBatchId] = useState('');
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [translations, setTranslations] = useState<Translation[]>([]);
@@ -302,7 +297,7 @@ export default function App() {
     loadPersistedBatchData();
   }, []);
 
-  const createTranslations = (language: SupportedLanguage, batchId: string): Translation[] =>
+  const createTranslations = (language: string, batchId: string): Translation[] =>
     createTranslationsFromSeeds(translationSeeds, language, batchId);
 
   const handleEnterReview = (event: FormEvent<HTMLFormElement>) => {
@@ -394,81 +389,74 @@ export default function App() {
         return;
       }
 
-      const frenchFile = getZipEntry(zip, 'french.json');
-      const spanishFile = getZipEntry(zip, 'spanish.json');
-      const germanFile = getZipEntry(zip, 'german.json');
-
-      if (!frenchFile || !spanishFile || !germanFile) {
-        setAdminNotice('Zip must include french.json, spanish.json, and german.json.');
+      const missingFiles = SUPPORTED_LANGUAGES.filter((lang) => !getZipEntry(zip, `${lang.toLowerCase()}.json`));
+      if (missingFiles.length > 0) {
+        setAdminNotice(`Zip is missing: ${missingFiles.map((l) => `${l.toLowerCase()}.json`).join(', ')}`);
         return;
       }
 
-      const [frenchRaw, spanishRaw, germanRaw] = await Promise.all([
-        frenchFile.async('string'),
-        spanishFile.async('string'),
-        germanFile.async('string'),
-      ]);
+      const langContents = await Promise.all(
+        SUPPORTED_LANGUAGES.map(async (lang) => {
+          const filename = `${lang.toLowerCase()}.json`;
+          const raw = await getZipEntry(zip, filename)!.async('string');
+          return { lang, rows: parseImportRows(parseJsonContent(raw, filename), lang.toLowerCase()) };
+        })
+      );
 
-      const frenchRows = parseImportRows(parseJsonContent(frenchRaw, 'french.json'), 'french');
-      const spanishRows = parseImportRows(parseJsonContent(spanishRaw, 'spanish.json'), 'spanish');
-      const germanRows = parseImportRows(parseJsonContent(germanRaw, 'german.json'), 'german');
-
-      if (!frenchRows.length) {
-        setAdminNotice('french.json is empty. Add at least one translation row.');
+      const firstLang = langContents[0];
+      if (!firstLang.rows.length) {
+        setAdminNotice(`${firstLang.lang.toLowerCase()}.json is empty. Add at least one translation row.`);
         return;
       }
 
-      if (frenchRows.length !== spanishRows.length || frenchRows.length !== germanRows.length) {
-        setAdminNotice('french.json, spanish.json, and german.json must have the same number of rows.');
+      const rowCount = firstLang.rows.length;
+      const mismatchedCount = langContents.find(({ rows }) => rows.length !== rowCount);
+      if (mismatchedCount) {
+        setAdminNotice(`All language files must have the same number of rows. ${mismatchedCount.lang.toLowerCase()}.json has ${mismatchedCount.rows.length}, expected ${rowCount}.`);
         return;
       }
 
-      const byPanel = {
-        French: new Map(frenchRows.map((row) => [row.panelId, row])),
-        Spanish: new Map(spanishRows.map((row) => [row.panelId, row])),
-        German: new Map(germanRows.map((row) => [row.panelId, row])),
-      };
+      const byPanel = new Map(
+        SUPPORTED_LANGUAGES.map((lang) => [
+          lang,
+          new Map(langContents.find((lc) => lc.lang === lang)!.rows.map((row) => [row.panelId, row])),
+        ])
+      );
 
-      const panelIds = [...byPanel.French.keys()];
+      const panelIds = [...byPanel.get(firstLang.lang)!.keys()];
 
-      if (
-        panelIds.length !== byPanel.Spanish.size ||
-        panelIds.length !== byPanel.German.size ||
-        panelIds.some((id) => !byPanel.Spanish.has(id) || !byPanel.German.has(id))
-      ) {
-        setAdminNotice('All language files must contain the same Panel-ID set.');
-        return;
+      for (const { lang, rows } of langContents.slice(1)) {
+        const panelMap = byPanel.get(lang)!;
+        if (
+          panelIds.length !== panelMap.size ||
+          panelIds.some((id) => !panelMap.has(id))
+        ) {
+          setAdminNotice(`All language files must contain the same Panel-ID set. Mismatch in ${lang.toLowerCase()}.json.`);
+          return;
+        }
+        const mismatchedText = panelIds.find(
+          (id) => rows.find((r) => r.panelId === id)?.originalText !== byPanel.get(firstLang.lang)!.get(id)?.originalText
+        );
+        if (mismatchedText) {
+          throw new Error(`Panel-ID ${mismatchedText} has mismatched original text across language files.`);
+        }
       }
 
       const importedAt = new Date().toISOString();
       const newBatchId = zipBatchName;
-      const nextBatch: BatchDefinition = {
-        name: zipBatchName,
-        importedAt,
-      };
+      const nextBatch: BatchDefinition = { name: zipBatchName, importedAt };
 
       const importedSeeds: TranslationSeed[] = panelIds.map((panelId) => {
-        const frenchRow = byPanel.French.get(panelId)!;
-        const spanishRow = byPanel.Spanish.get(panelId)!;
-        const germanRow = byPanel.German.get(panelId)!;
-
-        if (
-          frenchRow.originalText !== spanishRow.originalText ||
-          frenchRow.originalText !== germanRow.originalText
-        ) {
-          throw new Error(`Panel-ID ${panelId} has mismatched original text across language files.`);
+        const translations: Record<string, string> = {};
+        for (const lang of SUPPORTED_LANGUAGES) {
+          translations[lang] = byPanel.get(lang)!.get(panelId)!.suggestedTranslation;
         }
-
         return {
-        id: panelId,
-        englishText: frenchRow.originalText,
-        batchId: newBatchId,
-        translations: {
-          Spanish: spanishRow.suggestedTranslation,
-          German: germanRow.suggestedTranslation,
-          French: frenchRow.suggestedTranslation,
-        },
-      };
+          id: panelId,
+          englishText: byPanel.get(firstLang.lang)!.get(panelId)!.originalText,
+          batchId: newBatchId,
+          translations,
+        };
       });
 
       const response = await fetch(apiUrl('/api/batches'), {
@@ -525,7 +513,7 @@ export default function App() {
     }
   };
 
-  const loadBatch = (language: SupportedLanguage, batchId: string) => {
+  const loadBatch = (language: string, batchId: string) => {
     const sessionKey = getSessionKey(language, batchId);
     const sessionTranslations = reviewSessions[sessionKey] ?? createTranslations(language, batchId);
 
@@ -621,7 +609,7 @@ export default function App() {
   const reviewedBatchReports: ReviewedBatchReport[] = Object.entries(submittedSessions)
     .filter(([, submitted]) => submitted)
     .map(([sessionKey]) => {
-      const [language, batchId] = sessionKey.split(':') as [SupportedLanguage, string];
+      const [language, batchId] = sessionKey.split(':') as [string, string];
       const reportTranslations = reviewSessions[sessionKey] ?? createTranslations(language, batchId);
       const approvedCount = reportTranslations.filter((translation) => translation.status === 'approved').length;
       const disapprovedCount = reportTranslations.filter((translation) => translation.status === 'disapproved').length;
@@ -663,7 +651,7 @@ export default function App() {
     setShowDialog(false);
   };
 
-  const handleLanguageSelection = (language: SupportedLanguage) => {
+  const handleLanguageSelection = (language: string) => {
     setSelectedLanguage(language);
     setPasswordError('');
   };
@@ -768,7 +756,9 @@ export default function App() {
                 >
                   <h2 className={`text-2xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Add Batch</h2>
                   <p className={`text-sm ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
-                    Batch name is taken from the zip filename. Include `french.json`, `spanish.json`, and `german.json`.
+                    Batch name is taken from the zip filename. Include one JSON file per language named
+                    <code className="mx-1 font-mono">{'{language}.json'}</code>
+                    (e.g. <code className="font-mono">french.json</code>).
                     Each row must contain Panel-ID, Original text, and suggested translation.
                   </p>
                   <input
@@ -907,8 +897,8 @@ export default function App() {
                 <p className={`text-sm uppercase tracking-[0.2em] mb-4 ${isDarkMode ? 'text-[#93a19a]' : 'text-[#808080]'}`}>
                   Choose language
                 </p>
-                <div className="grid gap-4 md:grid-cols-3">
-                  {(['Spanish', 'French', 'German'] as SupportedLanguage[]).map((language) => {
+                <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                  {SUPPORTED_LANGUAGES.map((language) => {
                     const isActive = selectedLanguage === language;
 
                     return (
@@ -969,7 +959,7 @@ export default function App() {
                 isDarkMode ? 'bg-[#141b19] border-[#2f3a35] text-[#b7c2bb]' : 'bg-[#f7f8f3] border-[#C4D8B1] text-[#556052]'
               }`}>
                 <p className="text-sm">
-                  Demo passwords: Spanish <span className="font-semibold">hola-review</span>, French <span className="font-semibold">bonjour-review</span>, German <span className="font-semibold">hallo-review</span>
+                  Password format: <span className="font-mono font-semibold">{'{language}-review'}</span> — e.g. <span className="font-mono font-semibold">french-review</span>, <span className="font-mono font-semibold">german-review</span>
                 </p>
               </div>
 

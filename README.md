@@ -52,13 +52,16 @@ Batches are imported by an admin as a `.zip` file produced by the NIBE translato
 1. Click **Admin Mode** and enter the admin password
 2. Under **Add Batch**, select your `.zip` file and click **Add Batch**
 
-The zip must contain exactly three JSON files:
+The zip must contain one JSON file per language, named `{language}.json` (lowercase). All 25 NIBE languages are required:
 
 ```
 batch-6081.zip
+├── english.json
+├── swedish.json
+├── german.json
 ├── french.json
 ├── spanish.json
-└── german.json
+└── ... (all 25 languages)
 ```
 
 Each file is an array of objects:
@@ -88,14 +91,14 @@ Submitted batches can be reopened and modified.
 
 ### Passwords
 
+Password format: `{language}-review` — e.g. `french-review`, `german-review`, `swedish-review`.
+
 | Role | Password |
 |---|---|
 | Admin | `nibe-admin` |
-| French reviewer | `bonjour-review` |
-| Spanish reviewer | `hola-review` |
-| German reviewer | `hallo-review` |
+| Reviewer | `{language}-review` |
 
-Passwords are set in `src/app/App.tsx` and should be changed before deploying publicly.
+Passwords are set in `src/app/languages.ts` and should be changed before deploying publicly.
 
 ## Scripts
 

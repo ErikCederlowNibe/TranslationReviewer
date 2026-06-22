@@ -6,6 +6,7 @@ import {
   initDatabase,
   saveReviewState,
 } from './db.js';
+import { SUPPORTED_LANGUAGES } from './languages.js';
 
 const app = express();
 const port = Number.parseInt(process.env.PORT ?? '8787', 10);
@@ -140,11 +141,9 @@ app.post('/api/batches', async (req, res) => {
     }
 
     if (
-      typeof seed.translations.Spanish !== 'string' ||
-      typeof seed.translations.French !== 'string' ||
-      typeof seed.translations.German !== 'string'
+      !SUPPORTED_LANGUAGES.every((lang) => typeof seed.translations[lang] === 'string')
     ) {
-      return res.status(400).json({ error: 'Translation row must include Spanish, French, and German strings.' });
+      return res.status(400).json({ error: `Translation row must include all ${SUPPORTED_LANGUAGES.length} supported languages.` });
     }
   }
 
