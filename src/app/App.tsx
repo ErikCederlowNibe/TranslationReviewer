@@ -1115,6 +1115,21 @@ export default function App() {
             </div>
           </div>
         </div>
+
+        {/* Upload Modal */}
+        {isUploading && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="fixed inset-0 bg-black/50" />
+            <div className={`relative rounded-lg shadow-xl p-8 flex flex-col items-center gap-4 ${
+              isDarkMode ? 'bg-[#1a2220]' : 'bg-white'
+            }`}>
+              <div className="w-10 h-10 rounded-full border-4 border-[#6A9266] border-t-transparent animate-spin" />
+              <p className={`text-sm font-medium ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
+                Uploading batch…
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1288,21 +1303,6 @@ export default function App() {
               <div className="w-10 h-10 rounded-full border-4 border-[#6A9266] border-t-transparent animate-spin" />
               <p className={`text-sm font-medium ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
                 Loading batches…
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Upload Modal */}
-        {isUploading && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="fixed inset-0 bg-black/50" />
-            <div className={`relative rounded-lg shadow-xl p-8 flex flex-col items-center gap-4 ${
-              isDarkMode ? 'bg-[#1a2220]' : 'bg-white'
-            }`}>
-              <div className="w-10 h-10 rounded-full border-4 border-[#6A9266] border-t-transparent animate-spin" />
-              <p className={`text-sm font-medium ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
-                Uploading batch…
               </p>
             </div>
           </div>
