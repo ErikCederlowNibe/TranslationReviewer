@@ -244,6 +244,8 @@ export default function App() {
   const [batchZipName, setBatchZipName] = useState('');
   const [adminNotice, setAdminNotice] = useState('');
   const [dataLoadError, setDataLoadError] = useState('');
+  const [isBatchesLoading, setIsBatchesLoading] = useState(true);
+  const [isUploading, setIsUploading] = useState(false);
   const batchZipInputRef = useRef<HTMLInputElement | null>(null);
 
   const persistReviewState = async (nextReviewSessions: ReviewSessions, nextSubmittedSessions: SubmissionSessions) => {
@@ -288,6 +290,8 @@ export default function App() {
         setDataLoadError('');
       } catch {
         setDataLoadError('Could not load batches from backend. Using local session data.');
+      } finally {
+        setIsBatchesLoading(false);
       }
     };
 
@@ -377,6 +381,7 @@ export default function App() {
       return;
     }
 
+    setIsUploading(true);
     try {
       const zip = await JSZip.loadAsync(batchZipFile);
       const zipBatchName = batchZipFile.name.replace(/\.zip$/i, '').trim();
@@ -495,6 +500,8 @@ export default function App() {
         ? error.message
         : 'Could not import this zip file. Verify Panel-ID, Original text, and suggested translation fields in each language JSON.';
       setAdminNotice(message);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -948,7 +955,7 @@ export default function App() {
                 </div>
               )}
 
-              {batchDefinitions.length === 0 && (
+              {!isBatchesLoading && batchDefinitions.length === 0 && (
                 <div className={`rounded-2xl border px-5 py-4 ${
                   isDarkMode ? 'bg-[#1a3d2e] border-[#6A9266]' : 'bg-[#e8f1e0] border-[#6A9266]'
                 }`}>
@@ -1268,6 +1275,36 @@ export default function App() {
             <p className="text-lg">
               This batch was already submitted. You can update the submission if you make changes.
             </p>
+          </div>
+        )}
+
+        {/* Loading Modal */}
+        {isBatchesLoading && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="fixed inset-0 bg-black/50" />
+            <div className={`relative rounded-lg shadow-xl p-8 flex flex-col items-center gap-4 ${
+              isDarkMode ? 'bg-[#1a2220]' : 'bg-white'
+            }`}>
+              <div className="w-10 h-10 rounded-full border-4 border-[#6A9266] border-t-transparent animate-spin" />
+              <p className={`text-sm font-medium ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
+                Loading batches…
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Upload Modal */}
+        {isUploading && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="fixed inset-0 bg-black/50" />
+            <div className={`relative rounded-lg shadow-xl p-8 flex flex-col items-center gap-4 ${
+              isDarkMode ? 'bg-[#1a2220]' : 'bg-white'
+            }`}>
+              <div className="w-10 h-10 rounded-full border-4 border-[#6A9266] border-t-transparent animate-spin" />
+              <p className={`text-sm font-medium ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
+                Uploading batch…
+              </p>
+            </div>
           </div>
         )}
 
