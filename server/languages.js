@@ -4,7 +4,6 @@ export const SUPPORTED_LANGUAGES = [
   'Czech',
   'Danish',
   'Dutch',
-  'English',
   'Estonian',
   'Finnish',
   'French',
