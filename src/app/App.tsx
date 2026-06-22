@@ -975,12 +975,11 @@ export default function App() {
                           </button>
                         )}
                       </div>
-                      {reviewedBatchReports.length === 0 ? (
+                      {reviewedBatchReports.filter((r) => !lockedSessions[r.sessionKey]).length === 0 ? (
                         <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>No submitted batches yet.</p>
                       ) : (
                         <div className="space-y-3 max-h-[320px] overflow-auto pr-1">
-                          {reviewedBatchReports.map((report) => {
-                            const isLocked = !!lockedSessions[report.sessionKey];
+                          {reviewedBatchReports.filter((r) => !lockedSessions[r.sessionKey]).map((report) => {
                             return (
                               <div key={report.sessionKey} className={`rounded-xl border px-4 py-3 ${isDarkMode ? 'bg-[#1f2b25] border-[#2f3a35]' : 'bg-white border-[#C4D8B1]'}`}>
                                 <div className="flex items-start justify-between gap-3">
@@ -988,13 +987,9 @@ export default function App() {
                                     <p className={`font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{report.batchName} ({report.language})</p>
                                     <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>Approved {report.approved} • Disapproved {report.disapproved} • Total {report.total}</p>
                                   </div>
-                                  {isLocked ? (
-                                    <span className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold bg-[#6A9266] text-white">Locked</span>
-                                  ) : (
-                                    <button type="button" onClick={() => handleLockSessions([report.sessionKey])} className="shrink-0 px-3 py-1 text-xs font-semibold rounded-full border border-[#6A9266] text-[#6A9266] hover:bg-[#6A9266] hover:text-white transition-colors">
-                                      Lock
-                                    </button>
-                                  )}
+                                  <button type="button" onClick={() => handleLockSessions([report.sessionKey])} className="shrink-0 px-3 py-1 text-xs font-semibold rounded-full border border-[#6A9266] text-[#6A9266] hover:bg-[#6A9266] hover:text-white transition-colors">
+                                    Lock
+                                  </button>
                                 </div>
                               </div>
                             );
@@ -1036,13 +1031,22 @@ export default function App() {
                                     {sessions.map((s) => s.language).join(', ')} · {sessions[0]?.entries.length ?? 0} rows each
                                   </p>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDownloadBatch(batchId, sessions)}
-                                  className="shrink-0 px-4 py-2 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors text-sm"
-                                >
-                                  Download zip
-                                </button>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadBatch(batchId, sessions)}
+                                    className="px-4 py-2 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors text-sm"
+                                  >
+                                    Download zip
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUnlockSessions(sessions.map((s) => `${s.language}:${s.batchId}`))}
+                                    className="px-4 py-2 rounded-lg border text-sm transition-colors border-[#6A9266] text-[#6A9266] hover:bg-[#6A9266] hover:text-white"
+                                  >
+                                    Unlock
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           ))}

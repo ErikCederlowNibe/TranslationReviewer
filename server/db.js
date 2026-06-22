@@ -436,6 +436,10 @@ export async function lockSessions(sessionKeys) {
   const writer = db.bulkWriter();
 
   for (const [batchId, sessions] of sessionsByBatch) {
+    // Parent document must exist for getReviewedBatches to discover this batch via .get()
+    // Firestore does not auto-create parent documents when writing to a subcollection.
+    writer.set(db.collection('reviewed_batches').doc(batchId), { batchId }, { merge: true });
+
     const seedSnapshot = await batchRef(db, batchId).collection('translation_seeds').get();
     const seedsForBatch = seedSnapshot.docs.map((doc) => {
       const data = doc.data();
