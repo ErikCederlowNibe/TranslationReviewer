@@ -1196,7 +1196,7 @@ export default function App() {
                 <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-4">
                   {SUPPORTED_LANGUAGES.map((language) => {
                     const isActive = selectedLanguage === language;
-                    const isComplete = batchDefinitions.every((batch) => {
+                    const isComplete = !isBatchesLoading && batchDefinitions.length > 0 && batchDefinitions.every((batch) => {
                       const sessionKey = getSessionKey(language, batch.name);
                       return submittedSessions[sessionKey];
                     });
