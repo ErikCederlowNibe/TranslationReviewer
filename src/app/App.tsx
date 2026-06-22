@@ -386,19 +386,25 @@ export default function App() {
         return;
       }
 
-      const missingFiles = SUPPORTED_LANGUAGES.filter((lang) => !getZipEntry(zip, `${lang.toLowerCase()}.json`));
-      if (missingFiles.length > 0) {
-        setAdminNotice(`Zip is missing: ${missingFiles.map((l) => `${l.toLowerCase()}.json`).join(', ')}`);
+      const langContents = (
+        await Promise.all(
+          SUPPORTED_LANGUAGES.map(async (lang) => {
+            const filename = `${lang.toLowerCase()}.json`;
+            const entry = getZipEntry(zip, filename);
+            if (!entry) {
+              return { lang, rows: null };
+            }
+            const raw = await entry.async('string');
+            const rows = parseImportRows(parseJsonContent(raw, filename), lang.toLowerCase());
+            return { lang, rows };
+          })
+        )
+      ).filter((lc) => lc.rows !== null) as { lang: string; rows: ImportTranslationRow[] }[];
+
+      if (!langContents.length) {
+        setAdminNotice('Zip file must contain at least one language JSON file.');
         return;
       }
-
-      const langContents = await Promise.all(
-        SUPPORTED_LANGUAGES.map(async (lang) => {
-          const filename = `${lang.toLowerCase()}.json`;
-          const raw = await getZipEntry(zip, filename)!.async('string');
-          return { lang, rows: parseImportRows(parseJsonContent(raw, filename), lang.toLowerCase()) };
-        })
-      );
 
       const firstLang = langContents[0];
       if (!firstLang.rows.length) {
@@ -414,9 +420,9 @@ export default function App() {
       }
 
       const byPanel = new Map(
-        SUPPORTED_LANGUAGES.map((lang) => [
+        langContents.map(({ lang, rows }) => [
           lang,
-          new Map(langContents.find((lc) => lc.lang === lang)!.rows.map((row) => [row.panelId, row])),
+          new Map(rows.map((row) => [row.panelId, row])),
         ])
       );
 
@@ -446,7 +452,8 @@ export default function App() {
       const importedSeeds: TranslationSeed[] = panelIds.map((panelId) => {
         const translations: Record<string, string> = {};
         for (const lang of SUPPORTED_LANGUAGES) {
-          translations[lang] = byPanel.get(lang)!.get(panelId)!.suggestedTranslation;
+          const panelMap = byPanel.get(lang);
+          translations[lang] = panelMap?.get(panelId)?.suggestedTranslation ?? '';
         }
         return {
           id: panelId,
