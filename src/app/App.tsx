@@ -941,6 +941,16 @@ export default function App() {
                 </div>
               )}
 
+              {batchDefinitions.length === 0 && (
+                <div className={`rounded-2xl border px-5 py-4 ${
+                  isDarkMode ? 'bg-[#1a3d2e] border-[#6A9266]' : 'bg-[#e8f1e0] border-[#6A9266]'
+                }`}>
+                  <p className={`text-sm font-medium ${isDarkMode ? 'text-[#8FD99E]' : 'text-[#4a7c4e]'}`}>
+                    No new batches to review for {selectedLanguage}. You can still make changes to previous reviews.
+                  </p>
+                </div>
+              )}
+
               <div className="max-w-xl">
                 <label
                   htmlFor="language-password"
