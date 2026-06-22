@@ -4,3 +4,4 @@ dist/
 .env.*
 firebasekey.json
 import-batches/
+server/data/
