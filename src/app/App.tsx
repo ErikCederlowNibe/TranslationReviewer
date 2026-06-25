@@ -252,7 +252,7 @@ export default function App() {
   const [archivedSessions, setArchivedSessions] = useState<SubmissionSessions>({});
   const [adminTab, setAdminTab] = useState<'batches' | 'download' | 'archived'>('batches');
   const [reviewedBatchData, setReviewedBatchData] = useState<ReviewedBatchSession[]>([]);
-  const [isLoadingReviewedBatches, setIsLoadingReviewedBatches] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [showDialog, setShowDialog] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -267,7 +267,6 @@ export default function App() {
   const [adminNotice, setAdminNotice] = useState('');
   const [dataLoadError, setDataLoadError] = useState('');
   const [isBatchesLoading, setIsBatchesLoading] = useState(true);
-  const [isUploading, setIsUploading] = useState(false);
   const batchZipInputRef = useRef<HTMLInputElement | null>(null);
 
   const persistReviewState = async (nextReviewSessions: ReviewSessions, nextSubmittedSessions: SubmissionSessions) => {
@@ -405,7 +404,7 @@ export default function App() {
       return;
     }
 
-    setIsUploading(true);
+    setLoadingMessage('Uploading batch…');
     try {
       const zip = await JSZip.loadAsync(batchZipFile);
       const zipBatchName = batchZipFile.name.replace(/\.zip$/i, '').trim();
@@ -527,14 +526,14 @@ export default function App() {
         : 'Could not import this zip file. Verify Panel-ID, Original text, and suggested translation fields in each language JSON.';
       setAdminNotice(message);
     } finally {
-      setIsUploading(false);
+      setLoadingMessage(null);
     }
   };
 
   const handleSwitchAdminTab = async (tab: 'batches' | 'download' | 'archived') => {
     setAdminTab(tab);
     if (tab === 'download' || tab === 'archived') {
-      setIsLoadingReviewedBatches(true);
+      setLoadingMessage('Loading batches…');
       try {
         const response = await fetch(apiUrl('/api/reviewed-batches'));
         if (!response.ok) throw new Error();
@@ -543,7 +542,7 @@ export default function App() {
       } catch {
         setAdminNotice('Failed to load reviewed batches.');
       } finally {
-        setIsLoadingReviewedBatches(false);
+        setLoadingMessage(null);
       }
     }
   };
@@ -565,28 +564,34 @@ export default function App() {
   };
 
   const handleDownloadBatch = async (batchId: string, sessions: ReviewedBatchSession[]) => {
-    const zip = new JSZip();
-    for (const session of sessions) {
-      const rows = session.entries.map((entry) => ({
-        'Panel-ID': entry.textId,
-        'Original text': entry.englishText,
-        'suggested translation': entry.finalTranslation,
-      }));
-      zip.file(`${session.language.toLowerCase()}.json`, JSON.stringify(rows, null, 4));
+    setLoadingMessage('Generating zip…');
+    try {
+      const zip = new JSZip();
+      for (const session of sessions) {
+        const rows = session.entries.map((entry) => ({
+          'Panel-ID': entry.textId,
+          'Original text': entry.englishText,
+          'suggested translation': entry.finalTranslation,
+        }));
+        zip.file(`${session.language.toLowerCase()}.json`, JSON.stringify(rows, null, 4));
+      }
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${batchId}-reviewed.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      await handleArchiveSessions(sessions.map((s) => `${s.language}:${s.batchId}`));
+    } finally {
+      setLoadingMessage(null);
     }
-    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${batchId}-reviewed.zip`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    await handleArchiveSessions(sessions.map((s) => `${s.language}:${s.batchId}`));
   };
 
   const handlePurgeOldArchives = async () => {
+    setLoadingMessage('Purging old archives…');
     try {
       const response = await fetch(apiUrl('/api/purge-old-archives'), { method: 'POST' });
       if (!response.ok) throw new Error();
@@ -611,10 +616,13 @@ export default function App() {
       setAdminNotice(`Purged ${purged} session(s) archived more than one month ago.`);
     } catch {
       setAdminNotice('Failed to purge old archives.');
+    } finally {
+      setLoadingMessage(null);
     }
   };
 
   const handleUnlockSessions = async (sessionKeys: string[]) => {
+    setLoadingMessage('Unlocking sessions…');
     try {
       const response = await fetch(apiUrl('/api/unlock-sessions'), {
         method: 'POST',
@@ -636,10 +644,13 @@ export default function App() {
       setAdminNotice(`Unlocked ${sessionKeys.length} session(s). Reviewers can now edit them again.`);
     } catch {
       setAdminNotice('Failed to unlock sessions. Please try again.');
+    } finally {
+      setLoadingMessage(null);
     }
   };
 
   const handleLockSessions = async (sessionKeys: string[]) => {
+    setLoadingMessage('Locking sessions…');
     try {
       const response = await fetch(apiUrl('/api/lock-sessions'), {
         method: 'POST',
@@ -655,6 +666,8 @@ export default function App() {
       setAdminNotice(`Locked ${sessionKeys.length} session(s).`);
     } catch {
       setAdminNotice('Failed to lock sessions. Please try again.');
+    } finally {
+      setLoadingMessage(null);
     }
   };
 
@@ -1013,12 +1026,7 @@ export default function App() {
                   );
                   return (
                     <div>
-                      {isLoadingReviewedBatches ? (
-                        <div className="flex items-center gap-3 py-6">
-                          <div className="w-5 h-5 rounded-full border-2 border-[#6A9266] border-t-transparent animate-spin" />
-                          <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>Loading locked batches…</p>
-                        </div>
-                      ) : pendingBatches.length === 0 ? (
+                      {pendingBatches.length === 0 ? (
                         <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>No locked batches ready for download.</p>
                       ) : (
                         <div className="space-y-4">
@@ -1082,12 +1090,7 @@ export default function App() {
                           Purge archives older than one month
                         </button>
                       </div>
-                      {isLoadingReviewedBatches ? (
-                        <div className="flex items-center gap-3 py-6">
-                          <div className="w-5 h-5 rounded-full border-2 border-[#6A9266] border-t-transparent animate-spin" />
-                          <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>Loading archived batches…</p>
-                        </div>
-                      ) : archivedBatches.length === 0 ? (
+                      {archivedBatches.length === 0 ? (
                         <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>No archived batches yet.</p>
                       ) : (
                         <div className="space-y-4">
@@ -1135,6 +1138,21 @@ export default function App() {
             )}
           </div>
         </div>
+
+      {/* Loading Modal */}
+      {loadingMessage !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-black/50" />
+          <div className={`relative rounded-lg shadow-xl p-8 flex flex-col items-center gap-4 ${
+            isDarkMode ? 'bg-[#1a2220]' : 'bg-white'
+          }`}>
+            <div className="w-10 h-10 rounded-full border-4 border-[#6A9266] border-t-transparent animate-spin" />
+            <p className={`text-sm font-medium ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
+              {loadingMessage}
+            </p>
+          </div>
+        </div>
+      )}
       </div>
     );
   }
@@ -1413,20 +1431,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Upload Modal */}
-        {isUploading && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="fixed inset-0 bg-black/50" />
-            <div className={`relative rounded-lg shadow-xl p-8 flex flex-col items-center gap-4 ${
-              isDarkMode ? 'bg-[#1a2220]' : 'bg-white'
-            }`}>
-              <div className="w-10 h-10 rounded-full border-4 border-[#6A9266] border-t-transparent animate-spin" />
-              <p className={`text-sm font-medium ${isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}`}>
-                Uploading batch…
-              </p>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
