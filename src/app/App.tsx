@@ -784,6 +784,25 @@ export default function App() {
       };
     });
 
+  const inProgressReports = Object.entries(reviewSessions)
+    .filter(([sessionKey, translations]) =>
+      !submittedSessions[sessionKey] &&
+      !lockedSessions[sessionKey] &&
+      translations.some((t) => t.status !== null)
+    )
+    .map(([sessionKey, translations]) => {
+      const [language, batchId] = sessionKey.split(':') as [string, string];
+      const batchName = batchDefinitions.find((b) => b.name === batchId)?.name ?? batchId;
+      return {
+        sessionKey,
+        language,
+        batchId,
+        batchName,
+        reviewed: translations.filter((t) => t.status !== null).length,
+        total: translations.length,
+      };
+    });
+
   const handleSubmit = () => {
     if (allReviewed) {
       if (currentSessionKey) {
@@ -975,25 +994,25 @@ export default function App() {
                       </button>
                     </form>
 
-                    <div className={`rounded-2xl border p-6 ${isDarkMode ? 'bg-[#141b19] border-[#2f3a35]' : 'bg-[#f7f8f3] border-[#C4D8B1]'}`}>
-                      <div className="flex items-center justify-between mb-4 gap-3">
-                        <h2 className={`text-2xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Submitted Reviews</h2>
-                        {reviewedBatchReports.some((r) => !lockedSessions[r.sessionKey]) && (
-                          <button
-                            type="button"
-                            onClick={() => handleLockSessions(reviewedBatchReports.filter((r) => !lockedSessions[r.sessionKey]).map((r) => r.sessionKey))}
-                            className="px-4 py-2 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors text-sm"
-                          >
-                            Lock All Pending
-                          </button>
-                        )}
-                      </div>
-                      {reviewedBatchReports.filter((r) => !lockedSessions[r.sessionKey]).length === 0 ? (
-                        <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>No submitted batches yet.</p>
-                      ) : (
-                        <div className="space-y-3 max-h-[320px] overflow-auto pr-1">
-                          {reviewedBatchReports.filter((r) => !lockedSessions[r.sessionKey]).map((report) => {
-                            return (
+                    <div className="flex flex-col gap-6">
+                      <div className={`rounded-2xl border p-6 ${isDarkMode ? 'bg-[#141b19] border-[#2f3a35]' : 'bg-[#f7f8f3] border-[#C4D8B1]'}`}>
+                        <div className="flex items-center justify-between mb-4 gap-3">
+                          <h2 className={`text-2xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Submitted Reviews</h2>
+                          {reviewedBatchReports.some((r) => !lockedSessions[r.sessionKey]) && (
+                            <button
+                              type="button"
+                              onClick={() => handleLockSessions(reviewedBatchReports.filter((r) => !lockedSessions[r.sessionKey]).map((r) => r.sessionKey))}
+                              className="px-4 py-2 bg-[#6A9266] text-white rounded-lg hover:bg-[#5d8259] transition-colors text-sm"
+                            >
+                              Lock All Pending
+                            </button>
+                          )}
+                        </div>
+                        {reviewedBatchReports.filter((r) => !lockedSessions[r.sessionKey]).length === 0 ? (
+                          <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>No submitted batches yet.</p>
+                        ) : (
+                          <div className="space-y-3 max-h-[240px] overflow-auto pr-1">
+                            {reviewedBatchReports.filter((r) => !lockedSessions[r.sessionKey]).map((report) => (
                               <div key={report.sessionKey} className={`rounded-xl border px-4 py-3 ${isDarkMode ? 'bg-[#1f2b25] border-[#2f3a35]' : 'bg-white border-[#C4D8B1]'}`}>
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
@@ -1005,10 +1024,26 @@ export default function App() {
                                   </button>
                                 </div>
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className={`rounded-2xl border p-6 ${isDarkMode ? 'bg-[#141b19] border-[#2f3a35]' : 'bg-[#f7f8f3] border-[#C4D8B1]'}`}>
+                        <h2 className={`text-2xl mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>In Progress</h2>
+                        {inProgressReports.length === 0 ? (
+                          <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>No reviews in progress.</p>
+                        ) : (
+                          <div className="space-y-3 max-h-[240px] overflow-auto pr-1">
+                            {inProgressReports.map((report) => (
+                              <div key={report.sessionKey} className={`rounded-xl border px-4 py-3 ${isDarkMode ? 'bg-[#1f2b25] border-[#2f3a35]' : 'bg-white border-[#C4D8B1]'}`}>
+                                <p className={`font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{report.batchName} ({report.language})</p>
+                                <p className={isDarkMode ? 'text-[#b7c2bb]' : 'text-[#556052]'}>{report.reviewed} of {report.total} reviewed</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
