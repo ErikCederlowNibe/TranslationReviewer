@@ -532,7 +532,22 @@ export default function App() {
 
   const handleSwitchAdminTab = async (tab: 'upload' | 'pending' | 'submitted' | 'download' | 'archived') => {
     setAdminTab(tab);
-    if (tab === 'download' || tab === 'archived') {
+    if (tab === 'pending' || tab === 'submitted') {
+      setLoadingMessage('Loading…');
+      try {
+        const response = await fetch(apiUrl('/api/batches'));
+        if (!response.ok) throw new Error();
+        const data = await response.json() as BatchDataResponse;
+        setReviewSessions(hydrateReviewSessions(data.reviewSessions ?? {}, data.translationSeeds));
+        setSubmittedSessions(data.submittedSessions ?? {});
+        setLockedSessions(data.lockedSessions ?? {});
+        setArchivedSessions(data.archivedSessions ?? {});
+      } catch {
+        setAdminNotice('Failed to load review data.');
+      } finally {
+        setLoadingMessage(null);
+      }
+    } else if (tab === 'download' || tab === 'archived') {
       setLoadingMessage('Loading batches…');
       try {
         const response = await fetch(apiUrl('/api/reviewed-batches'));
