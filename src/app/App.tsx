@@ -1377,7 +1377,10 @@ export default function App() {
             )}
 
             <div className="grid gap-4 md:grid-cols-3">
-              {batchDefinitions.filter((batch) => !lockedSessions[getSessionKey(activeLanguage, batch.name)]).map((batch) => {
+              {batchDefinitions.filter((batch) => {
+                if (lockedSessions[getSessionKey(activeLanguage, batch.name)]) return false;
+                return translationSeeds.some((seed) => seed.batchId === batch.name && seed.translations[activeLanguage]);
+              }).map((batch) => {
                 const sessionKey = getSessionKey(activeLanguage, batch.name);
                 const sessionTranslations = reviewSessions[sessionKey];
                 const reviewed = isBatchReviewed(sessionTranslations);
